@@ -1,0 +1,301 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: '### ms-description ###'
+Transform: AWS::Serverless-2016-10-31
+
+Parameters:
+    DeploymentPrefix:
+        AllowedPattern: ^$|^-[a-zA-Z0-9]+$
+        Type: String
+        Description: 'Prefix to be used to differentiate local deployments. Pattern: ^$|^-[a-zA-Z0-9]+$'
+        Default: ''
+    ### api-start ###
+    CognitoUserPoolArn:
+        Type: String
+        Description: Imported Cognito User Pool Arn to use in the template
+    ### api-end ###
+    EnvType:
+        Description: Environment type for conditional build (dev|staging|prod)
+        Default: dev
+        Type: String
+        AllowedValues:
+            - prod
+            - staging
+            - dev
+
+Rules:
+    prodNoPrefix:
+        RuleCondition: !Equals [!Ref EnvType, prod]
+        Assertions:
+            - Assert: !Equals [!Ref DeploymentPrefix, '']
+              AssertDescription: 'Production environment does not use prefix'
+    stagingFixPrefix:
+        RuleCondition: !Equals [!Ref EnvType, staging]
+        Assertions:
+            - Assert: !Equals [!Ref DeploymentPrefix, '-staging']
+              AssertDescription: 'Staging environment uses -staging prefix'
+
+Conditions:
+    IsDev: !Equals [!Ref EnvType, dev]
+    IsStaging: !Equals [!Ref EnvType, staging]
+    IsProd: !Equals [!Ref EnvType, prod]
+
+Globals:
+    Function:
+        Layers:
+            - !Ref RuntimeDependenciesLayer
+        Environment:
+            Variables:
+                ENV_TYPE: !Ref EnvType
+        Runtime: nodejs18.x
+        MemorySize: 128
+        Timeout: 100
+
+    ### api-start ###
+    Api:
+        Auth:
+            AddDefaultAuthorizerToCorsPreflight: false
+            Authorizers:
+                MsIdCognitoAuthorizer:
+                    UserPoolArn: !Ref CognitoUserPoolArn
+            DefaultAuthorizer: MsIdCognitoAuthorizer
+        Cors:
+            AllowMethods: "'GET,POST,PUT,PATCH,DELETE,OPTIONS'"
+            AllowHeaders: "'Content-Type,Authorization,Access-Control-Allow-Methods,Access-Control-Allow-Origin'"
+            # This could be inproved into being more specific for production env and still generic for dev/staging
+            AllowOrigins: "'*'"
+    ### api-end ###
+
+Resources:
+    ### api-start ###
+    MsAPIFunction:
+        Type: AWS::Serverless::Function
+        Metadata:
+            BuildMethod: makefile
+        Properties:
+            FunctionName: !Sub '### ms-name ###-api${DeploymentPrefix}'
+            Handler: 'dist/handlers/### ms-name ###-api.handler'
+            Description: '### ms-description ### API lambda handler'
+            Environment:
+                Variables:
+                    ### s3-start ###
+                    BUCKET_NAME: !Ref S3Bucket
+                    ### s3-end ###
+                    ### ddb-start ###
+                    DDB_NAME: !Ref DDBTable
+                    ### ddb-end ###
+                    ### events-start ###
+                    EVENT_BUS_NAME: !Sub 'ms${DeploymentPrefix}'
+                    ### events-end ###
+            Policies:
+                ### s3-start ###
+                - Statement:
+                      - Effect: Allow
+                        Resource: !GetAtt S3Bucket.Arn
+                        Action:
+                            - s3:PutObject
+                            - s3:GetObject
+                ### s3-end ###
+                ### ddb-start ###
+                - DynamoDBCrudPolicy:
+                      TableName: !Ref DDBTable
+                ### ddb-end ###
+                ### events-start ###
+                - Statement:
+                      - Effect: Allow
+                        Resource: !Sub 'arn:aws:events:${AWS::Region}:${AWS::AccountId}:event-bus/ms${DeploymentPrefix}'
+                        Action:
+                            - events:PutEvents
+                ### events-end ###
+            Events:
+                Healthcheck:
+                    Type: Api
+                    Properties:
+                        Path: /healthcheck
+                        # Public endpoints need this 2 lines below
+                        Auth:
+                            Authorizer: NONE
+                        Method: get
+                Private:
+                    Type: Api
+                    Properties:
+                        Path: /private
+                        Method: get
+
+    # MsAPIFunctionErrorAlarm:
+    #     Type: 'AWS::CloudWatch::Alarm'
+    #     Properties:
+    #         AlarmName: !If
+    #             - IsProd
+    #             - '### stack-short-name ###-api-alarm'
+    #             - !If
+    #               - IsStaging
+    #               - '### stack-short-name ###-api-staging-alarm'
+    #               - !If
+    #                 - IsDev
+    #                 - '### stack-short-name ###-api-dev-alarm'
+    #                 - !Sub 'my-stack-api${DeploymentPrefix}-alarm'
+    #         AlarmDescription: 'Triggered when Lambda function RoarAPIFunction has errors'
+    #         Namespace: 'AWS/Lambda'
+    #         MetricName: 'Errors'
+    #         Dimensions:
+    #             - Name: 'FunctionName'
+    #               Value: !Ref RoarAPIFunction
+    #         Statistic: 'SampleCount'
+    #         Period: 300
+    #         EvaluationPeriods: 1
+    #         DatapointsToAlarm: 1
+    #         ComparisonOperator: 'GreaterThanOrEqualToThreshold'
+    #         Threshold: 1
+    #         AlarmActions: !If
+    #             - IsProd
+    #             - 'arn:aws:sns:us-east-1:577709820940:ActivitylogStagingTopic'
+    #             - !If
+    #               - IsStaging
+    #               - 'arn:aws:sns:us-east-1:577709820940:ActivitylogStagingTopic'
+    #               - !If
+    #                 - IsDev
+    #                 - 'arn:aws:sns:us-east-1:577709820940:ActivitylogDevTopic'
+    #                 - 'arn:aws:sns:us-east-1:577709820940:ActivitylogDevTopic' # replace with your SNS Topic ARN
+    ### api-end ###
+
+    ### event-start ###
+    MsEventsFunction:
+        Type: AWS::Serverless::Function
+        Metadata:
+            BuildMethod: makefile
+        Properties:
+            FunctionName: !Sub '### ms-name ###-events${DeploymentPrefix}'
+            Handler: 'dist/handlers/### ms-name ###-events.handler'
+            Description: '### ms-description ### Event handler lambda'
+            Environment:
+                Variables:
+                    ### s3-start ###
+                    BUCKET_NAME: !Ref S3Bucket
+                    ### s3-end ###
+                    ### ddb-start ###
+                    DDB_NAME: !Ref DDBTable
+                    ### ddb-end ###
+                    ### events-start ###
+                    EVENT_BUS_NAME: !Sub 'ms${DeploymentPrefix}'
+                    ### events-end ###
+            Policies:
+                ### s3-start ###
+                - Statement:
+                      - Effect: Allow
+                        Resource: !GetAtt S3Bucket.Arn
+                        Action:
+                            - s3:PutObject
+                            - s3:GetObject
+                ### s3-end ###
+                ### ddb-start ###
+                - DynamoDBCrudPolicy:
+                      TableName: !Ref DDBTable
+                ### ddb-end ###
+                ### events-start ###
+                - Statement:
+                      - Effect: Allow
+                        Resource: !Sub 'arn:aws:events:${AWS::Region}:${AWS::AccountId}:event-bus/ms${DeploymentPrefix}'
+                        Action:
+                            - events:PutEvents
+                ### events-end ###
+    # MsEventsFunctionErrorAlarm:
+    #     Type: 'AWS::CloudWatch::Alarm'
+    #     Properties:
+    #         AlarmName: !If
+    #             - IsProd
+    #             - '### stack-short-name ###-events-alarm'
+    #             - !If
+    #               - IsStaging
+    #               - '### stack-short-name ###-events-staging-alarm'
+    #               - !If
+    #                 - IsDev
+    #                 - '### stack-short-name ###-events-dev-alarm'
+    #                 - !Sub '### stack-short-name ###-events${DeploymentPrefix}-alarm'
+    #         AlarmDescription: 'Triggered when Lambda function EventFunction has errors'
+    #         Namespace: 'AWS/Lambda'
+    #         MetricName: 'Errors'
+    #         Dimensions:
+    #             - Name: 'FunctionName'
+    #               Value: !Ref RoarAPIFunction
+    #         Statistic: 'SampleCount'
+    #         Period: 300
+    #         EvaluationPeriods: 1
+    #         DatapointsToAlarm: 1
+    #         ComparisonOperator: 'GreaterThanOrEqualToThreshold'
+    #         Threshold: 1
+    #         AlarmActions: !If
+    #             - IsProd
+    #             - 'arn:aws:sns:us-east-1:577709820940:ActivitylogStagingTopic'
+    #             - !If
+    #               - IsStaging
+    #               - 'arn:aws:sns:us-east-1:577709820940:ActivitylogStagingTopic'
+    #               - !If
+    #                 - IsDev
+    #                 - 'arn:aws:sns:us-east-1:577709820940:ActivitylogDevTopic'
+    #                 - 'arn:aws:sns:us-east-1:577709820940:ActivitylogDevTopic' # replace with your SNS Topic ARN
+    ### event-end ###
+
+    RuntimeDependenciesLayer:
+        Type: AWS::Serverless::LayerVersion
+        Metadata:
+            BuildMethod: makefile
+        Properties:
+            LayerName: !Sub '### ms-name ###-dependencies${DeploymentPrefix}'
+            Description: 'Runtime dependencies for ### ms-description ### Lambdas'
+            ContentUri: ./
+            RetentionPolicy: Retain
+
+    ### use-domain-start ###
+    APISubDomainName:
+        Type: AWS::ApiGateway::DomainName
+        Properties:
+            CertificateArn: '### certificate-arn ###'
+            DomainName: '### domain-name ###'
+
+    APIBasePathMapping:
+        Type: AWS::ApiGateway::BasePathMapping
+        Properties:
+            DomainName: !Ref APISubDomainName
+            RestApiId: !Ref ServerlessRestApi
+            Stage: Prod
+
+    SubDomain:
+        Type: AWS::Route53::RecordSetGroup
+        Properties:
+            HostedZoneName: Sub! '### domain-name ###.'
+            RecordSets:
+                - Name: '### ms-name ###-api.### domain-name ###'
+                  Type: A
+                  AliasTarget:
+                      EvaluateTargetHealth: false
+                      DNSName: !GetAtt APISubDomainName.DistributionDomainName
+                      HostedZoneId: !GetAtt APISubDomainName.DistributionHostedZoneId
+    ### use-domain-end ###
+
+    ### ddb-start ###
+    DDBTable:
+        Type: AWS::DynamoDB::Table
+        Properties:
+            BillingMode: PAY_PER_REQUEST
+            TableName: !Sub '### ddb-table-name ###${DeploymentPrefix}'
+            AttributeDefinitions:
+                - AttributeName: id
+                  AttributeType: S
+            KeySchema:
+                - AttributeName: id
+                  KeyType: HASH
+    ### ddb-end ###
+
+    ### s3-start ###
+    S3Bucket:
+        Type: AWS::S3::Bucket
+        Properties:
+            BucketName: !Sub '### bucket-name ###${DeploymentPrefix}'
+    ### s3-end ###
+
+Outputs:
+    ### api-start ###
+    APIBaseURL:
+        Description: '### ms-name ### API base URL'
+        Value: !Sub 'https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/prod'
+    ### api-end ###

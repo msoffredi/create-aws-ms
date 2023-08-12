@@ -1,0 +1,14 @@
+{
+    "name": "ms-name",
+    "version": "0.1.0",
+    "description": "Microservice template package.json file",
+    "devDependencies": {},
+    "scripts": {
+        "build": "node_modules/typescript/bin/tsc",
+        "watch": "node_modules/typescript/bin/tsc -w --preserveWatchOutput",
+        "test": "jest --runInBand --detectOpenHandles --forceExit --no-watchman",
+        "test:coverage": "jest --runInBand --coverage",
+        "test:watch": "jest --runInBand --watchAll --no-cache",
+        "test:version": "jest --version"
+    }
+}
