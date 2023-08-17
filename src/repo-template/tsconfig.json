@@ -20,5 +20,5 @@
         "forceConsistentCasingInFileNames": true,
         "moduleResolution": "node"
     },
-    "include": ["src/*.ts", "src/handlers/ms-api.ts"]
+    "include": ["src/*.ts"]
 }

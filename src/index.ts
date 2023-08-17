@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 
-import nodeFs from 'fs';
 import { config } from './config';
 import { U } from './utils/index';
 import { FS } from './utils/fs';
@@ -20,7 +19,7 @@ const asyncInstaller = async () => {
 
     // Copy template files
     console.log('Copying files...');
-    nodeFs.cpSync(U.templateDir, U.targetDir, { recursive: true });
+    FS.copyFiles(config);
 
     // Rename files
     console.log('Renaming files...');

@@ -94,4 +94,42 @@ export class FS {
 
         return arrayOfFiles;
     };
+
+    public static copyFiles = (mods: InstallerModules): void => {
+        // Iterate through modules in config
+        for (const prop in mods) {
+            // If module has files/folders to copy...
+            if (mods[prop]?.copyTasks) {
+                // Iterate through all files/folders to copy
+                mods[prop]?.copyTasks?.forEach((task) => {
+                    // If it's a filder to copy non-recursively
+                    if (
+                        !Boolean(task.recursive) &&
+                        nodeFs.statSync(task.src).isDirectory()
+                    ) {
+                        // Get all files in the directory
+                        const files = nodeFs.readdirSync(task.src);
+                        files.forEach((file) => {
+                            // Copy them only if they are not folders
+                            if (
+                                !nodeFs
+                                    .statSync(path.join(task.src, file))
+                                    .isDirectory()
+                            ) {
+                                nodeFs.cpSync(
+                                    path.join(task.src, file),
+                                    path.join(task.target, file),
+                                );
+                            }
+                        });
+                    } else {
+                        // Individual files and folder recursively are copied here
+                        nodeFs.cpSync(task.src, task.target, {
+                            recursive: Boolean(task.recursive),
+                        });
+                    }
+                });
+            }
+        }
+    };
 }

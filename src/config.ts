@@ -1,8 +1,16 @@
 import yup from 'yup';
+import { U } from './utils';
+import path from 'path';
 
 interface Package {
     name: string;
     dev?: boolean;
+}
+
+interface CopyTask {
+    src: string;
+    target: string;
+    recursive?: boolean;
 }
 
 interface InstallerModule {
@@ -16,6 +24,7 @@ interface InstallerModule {
     type: 'module' | 'variable';
     dependencies?: InstallerModules;
     packages?: Package[];
+    copyTasks?: CopyTask[];
 }
 
 export interface InstallerModules {
@@ -40,6 +49,15 @@ export const config: InstallerModules = {
             .matches(/^[a-zA-Z][a-zA-Z0-9-]+[a-zA-Z0-9]$/),
         validationErrorMsg: 'Invalid microservice name',
         type: 'variable',
+        copyTasks: [
+            { src: U.templateDir, target: U.targetDir },
+            {
+                src: path.join(U.templateDir, 'src/utils'),
+                target: path.join(U.targetDir, 'src/utils'),
+                recursive: true,
+            },
+        ],
+        packages: [{ name: '@jmsoffredi/ms-common' }],
     },
     'ms-description': {
         prompt: 'Provide a microservice description (128 chars max)',
@@ -56,8 +74,9 @@ export const config: InstallerModules = {
         type: 'module',
         dependencies: {
             'use-domain': {
-                prompt: `Do you want to configure a domain name (y/N)? 
-                    The domain needs to be already configured in AWS Route 53`,
+                prompt:
+                    'Do you want to configure a domain name ? ' +
+                    '[The domain needs to be already configured in AWS Route 53] (y/N)?',
                 promptType: 'confirm',
                 promptDefault: false,
                 validation: yup.boolean().required(),
@@ -89,6 +108,17 @@ export const config: InstallerModules = {
                 },
             },
         },
+        copyTasks: [
+            {
+                src: path.join(U.templateDir, 'src/handlers/ms-api.ts'),
+                target: path.join(U.targetDir, 'src/handlers/ms-api.ts'),
+            },
+            {
+                src: path.join(U.templateDir, 'src/route-handlers'),
+                target: path.join(U.targetDir, 'src/route-handlers'),
+                recursive: true,
+            },
+        ],
     },
     s3: {
         prompt: 'Do you need an S3 bucket (y/N)?',
